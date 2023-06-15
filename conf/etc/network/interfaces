@@ -1,0 +1,181 @@
+# This file describes the network interfaces available on your system
+# and how to activate them. For more information, see interfaces(5).
+
+
+# The loopback network interface
+auto lo
+iface lo inet loopback
+
+
+# -> LAN
+auto br0
+iface br0 inet static
+        address 192.168.0.1/24
+
+	# Use the br0 for loading the iptables rules.
+	# This ensures that the firewall rules are added
+	# before any of the physical interfaces are brought
+	# up and the rules are removed after all the physical
+	# interfaces are brought down.
+	# Man page of ifup(8) claims that the "ifdown -a" brings
+	# the interfaces down in the order in which they are
+	# currently listed in the state file(/run/network/ifstate),
+	# but this seems to be a bug:
+	# https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1033651
+	#
+	# Worthwhile notes about iptables rules:
+	#
+	#  * dhclient in DHCPv4 mode uses raw sockets(fallback UDP
+	#    socket for sending unicast packets is also opened) and
+	#    thus no firewall rule is needed
+	#
+	#  * important ICMP messages like "frag needed" or
+	#    "TTL exceeded" are accepted thanks to conntrack
+	#    "RELATED" state match
+	#
+	#  * certain ICMP messages sent by the router including
+	#    "Echo Reply" or "Destination Unreachable" are rate
+	#    limited by adjusting the kernel parameters in
+	#    /etc/sysctl.conf
+	#
+	#  * recent(used in SSH chain) module internals are seen
+	#    in the /proc/net/xt_recent/SSH file
+	#
+	#  * while igmpproxy is using raw sockets on the downstream
+	#    interface, then in regard to upstream interface the
+	#    igmpproxy simply acts as a normal multicast client(calls
+	#    setsockopt() with IP_ADD_MEMBERSHIP) and thus there is a
+	#    need to accept IGMP membership query messages sent by ISP.
+	#    This also means that the IPTV UDP datagrams are sent
+	#    towards the router application layer and dropped in the
+	#    filter table INPUT chain.
+	#
+	#  * IGMP messages can not be tracked by the conntrack module.
+	#    At least without an helper module. IGMP messages are sent
+	#    to IPv4 multicast address and thus the conntrack module
+	#    expects a reply sourced from a multicast address in order
+	#    to move from UNREPLIED state to ESTABLISHED state. However,
+	#    the multicast address is never used as a src IP.
+	#
+	#  * igmpproxy subscribes to 224.0.0.2(IGMP "Leave group" messages)
+	#    on a downstream interface and packets sent to this address
+	#    are subject to INPUT chain rules. That's the reason for
+	#    "-A INPUT -d 224.0.0.2/32 -i br0 -p igmp -j ACCEPT" rule. Details
+	#    are in https://marc.info/?l=netfilter&m=168393431101974&w=2
+	#
+	pre-up iptables-restore /usr/local/etc/IPv4_fw_rules
+
+	# Consider stray TCP packets with ACK flag set as
+	# INVALID. By default, such packets would create
+	# a NEW connection.
+	# "nf_conntrack_tcp_loose" is configured here instead
+	# of /etc/sysctl.conf because the nf_conntrack module
+	# is not yet loaded at the time the systemd-sysctl
+	# service is run.
+	pre-up sysctl -w net.netfilter.nf_conntrack_tcp_loose=0
+
+	# Set the MAC address manually. This ensures that the MAC address
+	# of br0 will not change when bridge ports are added or removed.
+	# This will avoid problems like hostapd adding the WNIC to bridge,
+	# causing the bridge MAC address change and thus breaking the
+	# dnsmasq if br0 flaps as the dnsmasq is bound to IPv6 link-local
+	# address derived from the old MAC address of the br0 bridge.
+	post-up ip link set dev $IFACE address 02:a7:29:a6:ec:61
+
+	post-down iptables-restore /usr/local/etc/IPv4_default_fw_rules
+
+	# "bridge_ports" requires "bridge-utils" package.
+        bridge_ports lan0 lan1 lan2 lan3
+
+iface br0 inet6 manual
+	# Worthwhile notes about ip6tables rules:
+	#
+	#  * dhclient in DHCPv6 mode is able to use ordinary UDP sockets
+	#    thanks to link-local addresses and does not need to use
+	#    raw sockets. This means that a firewall rule for DHCPv6
+	#    traffic is needed.
+	#
+	#  * ICMP6 "echo request" messages are rate limited by the
+	#    limit module. Newer kernel versions have the net.ipv6.icmp.ratemask
+	#    which would allow to rate limit the replies to "echo request"
+	#    messages by adjusting the net.ipv6.icmp.ratelimit.
+	#    ICMP6 "destination unreachable" messages are rate limited
+	#    according to net.ipv6.icmp.ratelimit.
+	#
+	#  * important ICMP6 messages like "packet too big" or
+	#    "time exceeded" or "destination unreachable" are
+	#    accepted thanks to conntrack "RELATED" state match
+	#
+	#  * RA messages sent by radvd to ff02::1 multicast addr
+	#    via LAN-facing interface are looped back by the IP
+	#    layer for local delivery. This is a default behavior
+	#    and can be controlled by IPV6_MULTICAST_LOOP(man 7 ipv6).
+	#    Those messages are dropped.
+	#
+	pre-up ip6tables-restore /usr/local/etc/IPv6_fw_rules
+	post-down ip6tables-restore /usr/local/etc/IPv6_default_fw_rules
+
+
+# -> Telia fiber
+auto wan0
+iface wan0 inet dhcp
+# Telia uses DHCPv6 prefix delegation to assign
+# a /56 IPv6 prefix. Default route is installed
+# thanks to NDP Router Advertisement messages
+# and it points to VRRPv3 link-local address.
+iface wan0 inet6 auto
+
+	# Stateless DHCPv6. dhclient will be started
+	# with "-P"(enable IPv6 prefix delegation) and
+	# without "-N"(normal address query for IPv6),
+	# i.e IPv6 address is not requested from DHCPv6
+	# server.
+	dhcp 1
+	request_prefix 1
+
+        # Enabling packet forwarding for IPv6(net.ipv6.conf.all.forwarding=1)
+        # in /etc/sysctl.conf sets the "net.ipv6.conf.<int>.forwarding" values
+	# to 1 which means that Router Solicitation messages are no longer sent
+        # and Router Advertisements messages are no longer accepted on those
+        # interfaces. "net.ipv6.conf.<int>.forwarding" value has nothing
+        # to do with controlling the per-interface forwarding like it does
+        # in case of IPv4. The "accept_ra 2"(net.ipv6.conf.wan0.accept_ra=2)
+        # means that Router Solicitations are sent and Router Advertisements
+        # are accepted despite the fact that "net.ipv6.conf.<int>.forwarding" is 1.
+        # Documentation: https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt
+	accept_ra 2
+
+# Mgnt network for Huawei MA5671A SFP ONT.
+# SSH server is reachable at 192.168.1.10.
+# User: root
+# Password: admin123
+#
+# Keeping the manually configured IPv4 addr
+# on the same interface where the dhclient
+# is running works thanks to "get-static-ipv4-addrs"
+# and "restore-static-ipv4-addrs" dhclient-script
+# enter and exit hooks. An alternative approach
+# would be to use a macvlan interface and for
+# example keep the static address there while
+# dhclient runs on the physical interface.
+iface wan0 inet static
+	address 192.168.1.200/24
+
+
+# -> Telia IPTV
+auto wan0.4
+# IPv6 for wan0.4 is disabled in /etc/sysctl.conf with net.ipv6.conf.wan0/4.disable_ipv6=1
+iface wan0.4 inet dhcp
+
+
+# -> Telia mobile broadband
+auto wwan0
+# wwan0 is a Telia-branded Huawei E3372s-153(hardware version CL1E3372SM Ver.A)
+# LTE modem with 22.x firmware working in Hilink mode having its own DHCP server
+# providing addresses from 192.168.8.0/24 network, web interface, performing NAT,
+# etc. For the OS it appears as an Ethernet device.
+# SIM is from Telia. Huawei E3372s-153 in Hilink mode does not support IPv6, nor
+# is IPv6 supported by Telia for the mobile broadband service.
+iface wwan0 inet static
+	address 192.168.8.200/24
+	post-up ip route add default via 192.168.8.1 metric 100

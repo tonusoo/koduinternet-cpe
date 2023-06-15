@@ -1,0 +1,8 @@
+# make_resolv_conf() function in /sbin/dhclient-script updates
+# /etc/resolv.conf based on received values. This is a dummy version
+# of this function in order to ensure that /etc/resolv.conf is
+# not touched by dhclient.
+# In addition, "chattr +i /etc/resolv.conf" was set.
+make_resolv_conf() {
+	true
+}

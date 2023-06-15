@@ -1,0 +1,26 @@
+--- src/igmpproxy.c~	2023-05-15 23:19:03.446584147 +0300
++++ src/igmpproxy.c	2023-05-15 23:20:55.125401534 +0300
+@@ -263,7 +263,7 @@
+     int     MaxFD, Rt, secs;
+     fd_set  ReadFDS;
+     socklen_t dummy = 0;
+-    struct  timespec  curtime, lasttime, difftime, tv;
++    struct  timespec  curtime, lasttime, difftime, tv, pselect_timeout;
+     // The timeout is a pointer in order to set it to NULL if nessecary.
+     struct  timespec  *timeout = &tv;
+ 
+@@ -306,8 +306,13 @@
+         FD_ZERO( &ReadFDS );
+         FD_SET( MRouterFD, &ReadFDS );
+ 
++	// https://github.com/pali/igmpproxy/issues/95
++	memcpy(&pselect_timeout, timeout, sizeof(struct timespec));
++	pselect_timeout.tv_sec *= 2;
++	my_log(LOG_DEBUG, 0, "Calling pselect() with %ld.%09ld seconds timeout", pselect_timeout.tv_sec, pselect_timeout.tv_nsec);
++
+         // wait for input
+-        Rt = pselect( MaxFD +1, &ReadFDS, NULL, NULL, timeout, NULL );
++	Rt = pselect( MaxFD +1, &ReadFDS, NULL, NULL, &pselect_timeout, NULL );
+ 
+         // log and ignore failures
+         if( Rt < 0 ) {

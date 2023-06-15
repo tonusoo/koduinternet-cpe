@@ -1,0 +1,114 @@
+--- bnx2x_link.c.orig	2023-01-08 22:05:36.052119774 +0200
++++ bnx2x_link.c	2023-01-22 15:28:31.938666110 +0200
+@@ -151,6 +151,7 @@ typedef int (*read_sfp_module_eeprom_fun
+ 
+ #define SFP_EEPROM_CON_TYPE_ADDR		0x2
+ 	#define SFP_EEPROM_CON_TYPE_VAL_UNKNOWN	0x0
++	#define SFP_EEPROM_CON_TYPE_VAL_SC	0x1
+ 	#define SFP_EEPROM_CON_TYPE_VAL_LC	0x7
+ 	#define SFP_EEPROM_CON_TYPE_VAL_COPPER	0x21
+ 	#define SFP_EEPROM_CON_TYPE_VAL_RJ45	0x22
+@@ -196,6 +197,8 @@ typedef int (*read_sfp_module_eeprom_fun
+ #define DEFAULT_TX_DRV_POST2		3
+ #define DEFAULT_TX_DRV_IPRE_DRIVER	6
+ 
++int sfp_tx_fault_ignore = 0;
++
+ /**********************************************************/
+ /*                     INTERFACE                          */
+ /**********************************************************/
+@@ -4210,6 +4213,15 @@ static void bnx2x_warpcore_set_sgmii_spe
+ 					 0x1000);
+ 		DP(NETIF_MSG_LINK, "set SGMII AUTONEG\n");
+ 	} else {
++		/* Note that 2.5G works only when used with 1G advertisment */
++		if (fiber_mode &&
++			(phy->req_line_speed == SPEED_2500) &&
++			(phy->speed_cap_mask & (PORT_HW_CFG_SPEED_CAPABILITY_D0_1G | PORT_HW_CFG_SPEED_CAPABILITY_D0_2_5G))) {
++
++			bnx2x_cl45_write(bp, phy, MDIO_WC_DEVAD, MDIO_WC_REG_SERDESDIGITAL_MISC1, 0x6010);
++
++		}
++
+ 		bnx2x_cl45_read(bp, phy, MDIO_WC_DEVAD,
+ 				MDIO_WC_REG_COMBO_IEEE0_MIICTRL, &val16);
+ 		val16 &= 0xcebf;
+@@ -4220,6 +4232,7 @@ static void bnx2x_warpcore_set_sgmii_spe
+ 			val16 |= 0x2000;
+ 			break;
+ 		case SPEED_1000:
++		case SPEED_2500:
+ 			val16 |= 0x0040;
+ 			break;
+ 		default:
+@@ -8173,6 +8186,7 @@ static int bnx2x_get_edc_mode(struct bnx
+ 		break;
+ 	}
+ 	case SFP_EEPROM_CON_TYPE_VAL_UNKNOWN:
++	case SFP_EEPROM_CON_TYPE_VAL_SC:
+ 	case SFP_EEPROM_CON_TYPE_VAL_LC:
+ 	case SFP_EEPROM_CON_TYPE_VAL_RJ45:
+ 		check_limiting_mode = 1;
+@@ -8183,7 +8197,8 @@ static int bnx2x_get_edc_mode(struct bnx
+ 		    (val[SFP_EEPROM_1G_COMP_CODE_ADDR] != 0)) {
+ 			DP(NETIF_MSG_LINK, "1G SFP module detected\n");
+ 			phy->media_type = ETH_PHY_SFP_1G_FIBER;
+-			if (phy->req_line_speed != SPEED_1000) {
++			if ((phy->req_line_speed != SPEED_1000) &&
++				(phy->req_line_speed != SPEED_2500)) {
+ 				u8 gport = params->port;
+ 				phy->req_line_speed = SPEED_1000;
+ 				if (!CHIP_IS_E1x(bp)) {
+@@ -8325,6 +8340,25 @@ static int bnx2x_verify_sfp_module(struc
+ 	netdev_err(bp->dev,  "Warning: Unqualified SFP+ module detected,"
+ 			      " Port %d from %s part number %s\n",
+ 			 params->port, vendor_name, vendor_pn);
++
++	/* While it is convenient, safe, avoids multiple
++	 * EEPROM reads and works in case of HUAWEI
++	 * MA5671A ONT as it's not an approved module,
++	 * then this check should probably not be
++	 * coupled with bnx2x_verify_sfp_module()
++	 * function.
++	 */
++	if (!memcmp(vendor_name, "HUAWEI          ", 16) &&
++		!memcmp(vendor_pn, "MA5671A         ", 16)) {
++
++			sfp_tx_fault_ignore = 1;
++
++			netdev_err(bp->dev,  "Warning: Ignoring TX fault for transceiver "
++					      " in port %d. Vendor: %s, part number: %s\n",
++					 params->port, vendor_name, vendor_pn);
++
++	}
++
+ 	if ((val & PORT_FEAT_CFG_OPT_MDL_ENFRCMNT_MASK) !=
+ 	    PORT_FEAT_CFG_OPT_MDL_ENFRCMNT_WARNING_MSG)
+ 		phy->flags |= FLAGS_SFP_NOT_APPROVED;
+@@ -11734,6 +11768,7 @@ static const struct bnx2x_phy phy_warpco
+ 			   SUPPORTED_100baseT_Full |
+ 			   SUPPORTED_1000baseT_Full |
+ 			   SUPPORTED_1000baseKX_Full |
++			   SUPPORTED_2500baseX_Full |
+ 			   SUPPORTED_10000baseT_Full |
+ 			   SUPPORTED_10000baseKR_Full |
+ 			   SUPPORTED_20000baseKR2_Full |
+@@ -12267,6 +12302,7 @@ static int bnx2x_populate_int_phy(struct
+ 			break;
+ 		case PORT_HW_CFG_NET_SERDES_IF_SFI:
+ 			phy->supported &= (SUPPORTED_1000baseT_Full |
++					   SUPPORTED_2500baseX_Full |
+ 					   SUPPORTED_10000baseT_Full |
+ 					   SUPPORTED_FIBRE |
+ 					   SUPPORTED_Pause |
+@@ -13801,6 +13837,10 @@ static void bnx2x_sfp_tx_fault_detection
+ 	u32 cfg_pin, value = 0;
+ 	u8 led_change, port = params->port;
+ 
++	if (sfp_tx_fault_ignore) {
++		return;
++	}
++
+ 	/* Get The SFP+ TX_Fault controlling pin ([eg]pio) */
+ 	cfg_pin = (REG_RD(bp, params->shmem_base + offsetof(struct shmem_region,
+ 			  dev_info.port_hw_config[port].e3_cmn_pin_cfg)) &

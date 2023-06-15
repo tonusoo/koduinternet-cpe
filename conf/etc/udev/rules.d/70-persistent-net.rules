@@ -1,0 +1,7 @@
+SUBSYSTEM=="net", ACTION=="add", DRIVERS=="?*", ATTR{address}=="00:10:18:dc:1d:30", ATTR{dev_id}=="0x0", ATTR{type}=="1", KERNEL=="eth*", NAME="wan0"
+SUBSYSTEM=="net", ACTION=="add", DRIVERS=="?*", ATTR{address}=="0c:5b:8f:27:9a:64", ATTR{dev_id}=="0x0", ATTR{type}=="1", KERNEL=="eth*", NAME="wwan0"
+SUBSYSTEM=="net", ACTION=="add", DRIVERS=="?*", ATTR{address}=="00:10:18:dc:1d:32", ATTR{dev_id}=="0x0", ATTR{type}=="1", KERNEL=="eth*", NAME="lan0"
+SUBSYSTEM=="net", ACTION=="add", DRIVERS=="?*", ATTR{address}=="d0:50:99:93:71:b5", ATTR{dev_id}=="0x0", ATTR{type}=="1", KERNEL=="eth*", NAME="lan1"
+SUBSYSTEM=="net", ACTION=="add", DRIVERS=="?*", ATTR{address}=="50:3e:aa:11:e8:4f", ATTR{dev_id}=="0x0", ATTR{type}=="1", KERNEL=="eth*", NAME="lan2"
+SUBSYSTEM=="net", ACTION=="add", DRIVERS=="?*", ATTR{address}=="50:3e:aa:11:7f:f0", ATTR{dev_id}=="0x0", ATTR{type}=="1", KERNEL=="eth*", NAME="lan3"
+SUBSYSTEM=="net", ACTION=="add", DRIVERS=="?*", ATTR{address}=="2c:fd:a1:cf:fd:56", ATTR{dev_id}=="0x0", ATTR{type}=="1", KERNEL=="wlan*", NAME="wlan0"

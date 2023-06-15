@@ -1,0 +1,432 @@
+# Title               : ipv6-pd-br0
+# Last modified date  : 26.03.2023
+# Author              : Martin Tonusoo
+# Description         : Script finds the /64 IPv6 network by combining the
+#                       /56 prefix delegated by Telia(from 2001:7d0::/32
+#                       allocation) and value of "ip6_net" variable. First
+#                       address of this /64 network is added to a port
+#                       specified by "ia_pd_iface" variable or removed
+#                       from this interface depending on the DHCPv6
+#                       event. In addition, radvd configuration file
+#                       is updated accordingly.
+# Options             :
+# Notes               : Script is meant to be run as a dhclient exit hook.
+#
+#                       Script expects a single dhclient instance
+#                       in DHCPv6 mode, i.e it is not tested for
+#                       possible race conditions which might occur
+#                       if multiple "dhclient -6 ..." instances
+#                       are running at once.
+#
+#                       Script is POSIX sh compliant except the variables
+#                       declared to be local to functions. Coding style
+#                       is based on /usr/sbin/dhclient-script.
+#
+#                       Initially based on script seen here:
+#                       https://wiki.debian.org/IPv6PrefixDelegation
+
+
+ia_pd_iface="br0"
+
+
+# Values from 00 to ff.
+ip6_net="00"
+
+
+find_ia_pd_addr() {
+
+	local h h1 h2 h3 h4 ip6_prefix
+
+	# According to technical service description,
+	# Telia delegates a /56 prefix from their
+	# 2001:7d0::/32 allocation. This function takes
+	# the delegated /56 prefix as an input, combines
+	# it with the value of ip6_net variable and
+	# returns a RFC5952(A Recommendation for IPv6
+	# Address Text Representation) compatible /64 prefix.
+
+
+	# Explode the possibly compressed IPv6 prefix.
+
+	IFS=: read -r h1 h2 h3 h4 _ <<-EOF
+		${1%/56}
+	EOF
+
+	ip6_prefix=""
+	for h in "$h1" "$h2" "${h3:-0}" "${h4:-0}"; do
+		ip6_prefix="$ip6_prefix"$(printf "%04x:" "0x$h")
+	done
+
+	ip6_prefix="${ip6_prefix%[[:xdigit:]][[:xdigit:]]:}$ip6_net::/64"
+
+
+	# Convert the exploded IPv6 prefix back to RFC5952
+	# compatible compressed format.
+
+	IFS=: read -r h1 h2 h3 h4 _ <<-EOF
+		$ip6_prefix
+	EOF
+
+	# In case both the third and fourth hextet
+	# is all zeros, then simply do not show those
+	# in the final output.
+	if [ "$h3" = "0000" ] && [ "$h4" = "0000" ]; then
+		h3=""
+		h4=""
+	fi
+
+	ip6_prefix=""
+	for h in "$h1" "$h2" "$h3" "$h4"; do
+		[ -z "$h" ] && continue
+		ip6_prefix="$ip6_prefix"$(printf "%x:" "0x$h")
+	done
+
+	echo "$ip6_prefix:/64"
+
+}
+
+
+get_prefix_rm_time() {
+
+	local valid_lft="$1"
+	local unix_time rm_unix_time
+
+	unix_time=$(date +%s)
+
+	# Sanity check. Ensure that $valid_lft is an int.
+	case "$valid_lft" in
+		""|*[!0-9]*)
+			rm_unix_time="$unix_time"
+			;;
+		*)
+			rm_unix_time=$(( unix_time + valid_lft ))
+			;;
+	esac
+
+	date --iso-8601="seconds" -d @"$rm_unix_time"
+
+}
+
+
+get_ip6_ll_addr() {
+
+	local iface="$1"
+	local mac_addr ll_prefix
+
+	# Pick the first link local IPv6 address.
+	read -r _ _ ll_prefix _ <<-EOF
+		$(ip --brief -6 addr show dev "$iface" scope link 2>/dev/null)
+	EOF
+
+	if [ -n "$ll_prefix" ]; then
+
+		echo "${ll_prefix%/*}"
+
+	elif [ -x "$(PATH=$PATH:/usr/local/bin/ command -v mac_to_ip6_ll_addr)" ]; then
+
+		# As it's possible that the interface is for example in the administratively
+		# disabled state and thus does not have the automatically found link local
+		# address set, then use the external script which is able to calculate the
+		# IPv6 link local address based on the MAC address.
+		read -r _ _ mac_addr _ <<-EOF
+			$(ip --brief link show dev "$iface" 2>/dev/null)
+		EOF
+
+		PATH="$PATH:/usr/local/bin/" mac_to_ip6_ll_addr "$mac_addr"
+	fi
+
+}
+
+
+# Function creates an initial Router Advertisement
+# Daemon(radvd) configuration file /etc/radvd.conf
+# if it does not exist or updates the prefix and
+# RDNSS(Recursive DNS Server) statements based on
+# DHCPv6 updates in case the /etc/radvd.conf is
+# present. Preferred and valid lifetime of the prefix
+# set by Telia's DHCPv6 server(s) are propagated
+# towards LAN by radvd.
+#
+# It's needed to keep advertising the prefixes with
+# no valid or preferred lifetime left towards LAN at
+# least as long as the last non-zero valid lifetime
+# of the prefix in order to ensure that all the
+# hosts in LAN pick up the prefix deprecation. Such
+# setup ensures that the prefix deprecation is seen
+# even by devices which were for example in suspended
+# to RAM state at the time of the delegated prefix change.
+#
+# For each "prefix" statement in radvd.conf file the
+# function finds a timestamp in the future when this
+# prefix could be removed from the radvd.conf file
+# in order to avoid stale entries. Prefixes removal
+# from radvd.conf are handled by another script
+# running in cron as this should not be coupled with
+# dhclient.
+#
+# RDNSS definition is overwritten with a link-local
+# address of the interface where the /64 address is
+# added. The link-local address is found automatically
+# because this interface could be a bridge and depending
+# on the kernel version the bridge interface MAC address
+# changes depending on its member interfaces. This in
+# turn can cause the IPv6 link local address to change.
+#
+# According to RFC8106 section 5.1 the addresses for
+# RDNSSes in the RDNSS option MAY be link-local addresses.
+# Tested with Debian 11 host running rdnssd ver 1.0.4.
+#
+# Function is based on make_resolv_conf() in
+# /sbin/dhclient-script.
+make_radvd_conf() {
+
+	local prefix="$1"
+	local preferred_lft="$2"
+	local valid_lft="$3"
+	local ll_addr radvd_conf new_radvd_conf line option value prefix_rm_time prefix_found
+
+	ll_addr=$(get_ip6_ll_addr "$ia_pd_iface")
+
+	radvd_conf=$(readlink -f "/etc/radvd.conf" 2>/dev/null) ||
+		radvd_conf="/etc/radvd.conf"
+
+	prefix_rm_time=$(get_prefix_rm_time "$valid_lft")
+
+	if [ -f "$radvd_conf" ]; then
+
+		new_radvd_conf="${radvd_conf}.dhclient-new.$$"
+		wait_for_rw "$new_radvd_conf"
+		rm -f "$new_radvd_conf"
+
+		prefix_found=""
+		while IFS= read -r line; do
+
+			case "$line" in
+				"    RDNSS "*)
+					printf "    RDNSS %s { };\n" "$ll_addr"
+					;;
+				"    prefix $prefix {"*)
+
+					if [ "$valid_lft" = "0" ]; then
+
+						IFS=" ;" read -r _ _ _ option value _ <<-EOF
+							$line
+						EOF
+
+						if [ "$option" = "AdvValidLifetime" ]; then
+							# If the value of AdvValidLifetime was already 0, then
+							# keep using the old expiration field.
+							if [ "$value" = "0" ]; then
+								prefix_rm_time="${line##* }"
+							else
+								prefix_rm_time=$(get_prefix_rm_time "$value")
+							fi
+						fi
+					fi
+
+					printf "    prefix %s { AdvValidLifetime %s; AdvPreferredLifetime %s; }; # expires at %s\n" \
+						"$prefix" \
+						"$valid_lft" \
+						"$preferred_lft" \
+						"$prefix_rm_time"
+					prefix_found="yes"
+					;;
+				"};")
+					if [ -z "$prefix_found" ]; then
+
+						# Last line of the conf file AND prefix was not found. Add the new prefix.
+						printf "    prefix %s { AdvValidLifetime %s; AdvPreferredLifetime %s; }; # expires at %s\n%s\n" \
+							"$prefix" \
+							"$valid_lft" \
+							"$preferred_lft" \
+							"$prefix_rm_time" \
+							"};"
+					else
+						echo "};"
+					fi
+					;;
+				*)
+					echo "$line"
+					;;
+			esac
+
+		done < "$radvd_conf" >>"$new_radvd_conf"
+
+		chown --reference="$radvd_conf" "$new_radvd_conf"
+		chmod --reference="$radvd_conf" "$new_radvd_conf"
+		mv -f "$new_radvd_conf" "$radvd_conf"
+
+	else
+		# Build the initial radvd configuration.
+		cat <<-EOF > "$radvd_conf"
+		# Generated by ipv6-pd-br0 dhclient exit hook.
+		interface $ia_pd_iface
+		{
+		    # Send RA messages.
+		    AdvSendAdvert on;
+		    MinRtrAdvInterval 60;
+		    MaxRtrAdvInterval 180;
+		    RDNSS $ll_addr { };
+		    prefix $prefix { AdvValidLifetime $valid_lft; AdvPreferredLifetime $preferred_lft; }; # expires at $prefix_rm_time
+		};
+		EOF
+	fi
+
+	# Reload the radvd if it is already running.
+	# This will immediately send a Router Advertisement
+	# to hosts in LAN.
+	if systemctl is-active --quiet radvd.service; then
+		systemctl reload radvd.service 2>/dev/null
+	fi
+}
+
+
+# Only execute on specific occasions
+case "$reason" in
+	BOUND6|EXPIRE6|REBIND6|REBOOT6|RENEW6|RELEASE6|STOP6|DEPREF6)
+
+		# Only execute if either an old or a new or a current prefix is defined
+		if [ -n "$old_ip6_prefix" ] || [ -n "$new_ip6_prefix" ] || [ -n "$cur_ip6_prefix" ]; then
+			# Check if interface is defined and exits
+			if [ -z "$ia_pd_iface" ] || [ ! -e "/sys/class/net/${ia_pd_iface}" ]; then
+				logger -t "ipv6-pd-br0" -p daemon.err \
+				"$reason - ERROR: Interface ${ia_pd_iface:-<undefined>} not found."
+			else
+
+				# Remove old prefix if it differs from new prefix or the valid
+				# lifetime of the new prefix is 0.
+				if { [ -n "$old_ip6_prefix" ] && [ "$old_ip6_prefix" != "$new_ip6_prefix" ]; } ||
+					{ [ -n "$new_max_life" ] && [ "$new_max_life" -eq 0 ]; }; then
+
+					old_ia_pd_addr=$(find_ia_pd_addr "$old_ip6_prefix")
+
+					while read -r error_message; do
+						case "$error_message" in
+							"")
+								logger -t "ipv6-pd-br0" -p daemon.info \
+								"$reason - INFO: Deleted old address $old_ia_pd_addr from interface $ia_pd_iface."
+								;;
+							"RTNETLINK answers: Cannot assign requested address")
+								logger -t "ipv6-pd-br0" -p daemon.info \
+								"$reason - INFO: Address $old_ia_pd_addr already deleted from interface $ia_pd_iface."
+								;;
+							*)
+								logger -t "ipv6-pd-br0" -p daemon.err \
+								"$reason - ERROR: Failed to delete old address $old_ia_pd_addr from interface $ia_pd_iface."
+							esac
+
+					done <<-EOF
+						$(ip -6 addr del "$old_ia_pd_addr" dev "$ia_pd_iface" scope global 2>&1)
+					EOF
+
+					# At this point, the address should be removed from the LAN-facing interface
+					# and the hosts in LAN will soon receive an RA with prefix AdvValidLifetime and
+					# AdvPreferredLifetime both set to zero.
+					#
+					# While the hosts will adjust the preferred lifetime accordingly, then the
+					# valid lifetime update will be ignored(RFC 4862 Section 5.5.3 point e) and
+					# this means that hosts can still be using addresses from the old prefix
+					# for existing connections.
+					#
+					# While at least in newer kernels deleting an IPv6 address with a
+					# non-forever valid lifetime does not remove the route from
+					# the routing table, then it is likely that LAN hosts valid lifetime
+					# is higher than the lifetime of the connected route in the router
+					# because radvd messages are not in sync with dhclient events.
+					#
+					# So regardless whether the ISP keeps routing the packets destined to
+					# addresses from the old prefix, then make sure, that this router is
+					# not dropping those packets. Thus, update the connected route expiration
+					# counter with the value of the old valid lifetime of the address. This
+					# ensures that the connected route is present and it will expire after the
+					# addresses on LAN hosts.
+					if [ -n "$old_max_life" ] && [ "$old_max_life" -gt 0 ]; then
+						ip -6 route replace "$old_ia_pd_addr" dev "$ia_pd_iface" \
+						expires "$old_max_life" >/dev/null 2>&1
+					fi
+
+					# Inform the downstream clients, that the prefix is no longer valid.
+					make_radvd_conf "$old_ia_pd_addr" 0 0
+				fi
+
+
+				# Assign new prefix
+				if [ -n "$new_ip6_prefix" ] && [ "$new_max_life" -ne 0 ]; then
+
+					new_ia_pd_addr=$(find_ia_pd_addr "$new_ip6_prefix")
+
+					# "ip -6 addr replace ..." adds the address if it's
+					# missing or updates the valid and preferred lifetime
+					# counters of the address if the address is already
+					# configured.
+					# Adding an IPv6 address with a non-forever valid lifetime
+					# creates a temporary connected route which has "expires"
+					# counter with a value equal to valid lifetime of the address.
+					# At least in newer kernels deleting IPv6 address with a
+					# non-forever valid lifetime does not remove the route from
+					# the routing table. The route will expire automatically when
+					# its expiration counter reaches 0.
+					if ip -6 addr replace "$new_ia_pd_addr" \
+						${new_max_life:+valid_lft "$new_max_life"} \
+						${new_preferred_life:+preferred_lft "$new_preferred_life"} \
+						dev "$ia_pd_iface" >/dev/null 2>&1; then
+
+						logger -t "ipv6-pd-br0" -p daemon.info \
+						"$reason - INFO: Added/updated address $new_ia_pd_addr on interface $ia_pd_iface."
+					else
+
+						logger -t "ipv6-pd-br0" -p daemon.err \
+						"$reason - ERROR: Failed to add/update address $new_ia_pd_addr on interface $ia_pd_iface."
+					fi
+
+					make_radvd_conf "$new_ia_pd_addr" "$new_preferred_life" "$new_max_life"
+				fi
+
+
+				# Handle DEPREF6 similarly to dhclient-script by configuring
+				# the preferred lifetime of the IP from leased prefix to 0.
+				# Do not change the valid lifetime.
+				if [ "$reason" = "DEPREF6" ] && [ -n "$cur_ip6_prefix" ]; then
+
+					cur_ia_pd_addr=$(find_ia_pd_addr "$cur_ip6_prefix")
+
+					# Find the value of valid_lft. Unit of valid_lft is always "sec".
+					cur_valid_life=$(ip -oneline -6 addr show dev "$ia_pd_iface" to "$cur_ia_pd_addr" 2>/dev/null)
+					cur_valid_life="${cur_valid_life##*valid_lft }"
+					cur_valid_life="${cur_valid_life%%sec *}"
+
+					if [ -n "$cur_valid_life" ] && [ "$cur_valid_life" -gt 0 ]; then
+
+						# If one does not specify the value for "valid_lft", then
+						# it defaults to "forever".
+						if ip -6 addr change "$cur_ia_pd_addr" \
+							dev "$ia_pd_iface" scope global \
+							valid_lft "$cur_valid_life" \
+							preferred_lft 0 >/dev/null 2>&1; then
+
+							logger -t "ipv6-pd-br0" -p daemon.info \
+							"$reason - INFO: Changed the preferred lifetime of $cur_ia_pd_addr on interface $ia_pd_iface to 0."
+						else
+
+							logger -t "ipv6-pd-br0" -p daemon.err \
+							"$reason - ERROR: Failed to change the preferred lifetime of $cur_ia_pd_addr on interface $ia_pd_iface to 0."
+						fi
+
+						make_radvd_conf "$cur_ia_pd_addr" 0 "$cur_valid_life"
+					else
+						# Address was already removed or the valid lifetime was 0.
+						# Ensure, that the radvd gets configured accordingly.
+						make_radvd_conf "$cur_ia_pd_addr" 0 0
+					fi
+
+					# Ensure that the connected route is present and it will expire after the
+					# addresses on LAN hosts.
+					if [ -n "$cur_max_life" ] && [ "$cur_max_life" -gt 0 ]; then
+						ip -6 route replace "$cur_ia_pd_addr" dev "$ia_pd_iface" \
+						expires "$cur_max_life" >/dev/null 2>&1
+					fi
+				fi
+			fi
+		fi
+		;;
+esac

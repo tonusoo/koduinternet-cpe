@@ -1,0 +1,49 @@
+# Title               : get-static-ipv4-addrs
+# Last modified date  : 11.02.2023
+# Author              : Martin Tonusoo
+# Description         : Finds the permanent IPv4 addresses configured on the
+#                       interface and stores those to a variable, which is later
+#                       processed by dhclient restore-static-ipv4-addrs exit
+#                       hook script.
+#                       For example, in case the leased IPv4 address changes or the IPv4
+#                       address is released by the client(dhclient -r) or the lease
+#                       expires, then dhclient-script called by dhclient flushes all
+#                       the IPv4 addresses configured on the interface. This includes
+#                       IPv4 addresses defined in /etc/network/interfaces or conf
+#                       files in interfaces.d directory. This script finds the non-dynamic
+#                       IPv4 addresses configured on the interface and populates the
+#                       "perm_addrs" variable. Exit hook "restore-static-ipv4-addrs" adds
+#                       those addresses back to interface based on the content of the
+#                       "perm_addrs" variable.
+# Options             :
+# Notes               : Script is meant to be run as a dhclient enter hook.
+#                       Script is POSIX sh compliant.
+#
+#                       Routes and aliases("ALIAS DECLARATIONS" in dhclient.conf man)
+#                       are not touched.
+#
+#                       Dhclient-script called by dhclient binary always adds IPv4 addresses
+#                       to non-alias interface with "valid_lft" and "preferred_lft" set
+#                       which results with a "dynamic" flag set in the output of "ip addr".
+#
+#                       This script can't help in case the manually configured address is
+#                       from the same network as the address leased by the DHCP server AND
+#                       the manually configured address is a secondary one- if the dynamic
+#                       primary address expires, then both the dynamic primary and all
+#                       the secondary manually configured addresses are removed by the
+#                       kernel automatically.
+
+perm_addrs=""
+
+while read -r _ _ _ perm_addr _; do
+
+    # Sanity check.
+    case "$perm_addr" in
+        *.*.*.*/*)
+            perm_addrs="$perm_addrs $perm_addr"
+            ;;
+        esac
+
+done <<-EOF
+	$(ip -oneline -4 addr show dev "$interface" permanent label "$interface" 2>/dev/null)
+EOF

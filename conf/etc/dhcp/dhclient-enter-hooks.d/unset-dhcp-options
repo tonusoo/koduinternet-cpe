@@ -1,0 +1,8 @@
+# Host Name (Option 12)
+unset new_host_name
+
+# Interface MTU (Option 26)
+unset new_interface_mtu
+
+# Domain Search (Option 119)
+unset new_domain_search

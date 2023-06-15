@@ -1,0 +1,13 @@
+# Title               : restore-static-ipv4-addrs
+# Last modified date  : 11.02.2023
+# Author              : Martin Tonusoo
+# Description         : Restores the permanent IPv4 addresses stored in a
+#                       variable, which was populated by get-static-ipv4-addrs
+#                       dhclient enter hook.
+# Options             :
+# Notes               : Script is meant to be run as a dhclient exit hook.
+#                       Script is POSIX sh compliant.
+
+for perm_addr in $perm_addrs; do
+    ip -4 addr add "$perm_addr" dev "$interface" >/dev/null 2>&1 || true
+done

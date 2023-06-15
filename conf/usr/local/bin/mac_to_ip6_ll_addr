@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+
+# Title               : mac_to_ip6_ll_addr
+# Last modified date  : 13.03.2023
+# Author              : Martin Tonusoo
+# Description         : Script finds the IPv6 link local address
+#                       from the MAC address.
+# Options             : MAC address.
+# Notes               : Script expects the MAC address as a
+#                       command line argument in the format
+#                       returned by "ip link" command, e.g
+#                       52:54:00:db:99:99.
+
+
+mac_regex="^([0-9a-f]{2}:){5}([0-9a-f]{2})$"
+if [[ ! "$1" =~ $mac_regex ]]; then
+	printf "%s\n%s\n" "Usage:   ${0##*/} <MAC_addr>" \
+		"Example: ${0##*/} 52:54:00:db:99:99" \
+		>&2
+	exit 1
+fi
+
+IFS=: read -r o1 o2 o3 o4 o5 o6 <<< "$1"
+
+# Convert the four least significant bits of
+# the first octet of the MAC address from hex
+# to decimal.
+o1_dec=$(( 16#"${o1:1:1}" ))
+
+# Loop through the four least significant bits of
+# the first octet of the MAC address by shifting
+# one bit to right and checking if the bit is set
+# or not on each cycle starting from the least
+# significant bit and moving towards the most
+# significant bit. This will convert the second
+# hex character of the MAC address reading from
+# left to binary.
+for (( n="$o1_dec"; n>0; n >>= 1 )); do
+	o1_bits="$(( n & 1 ))$o1_bits"
+done
+
+# Prepend leading zeros if needed.
+o1_bits=$(printf "%04d" "$o1_bits")
+
+# Flip the second-least-significant bit of the
+# first octet of the MAC address and convert
+# four bits back to hex digit.
+flipped_bit=$(tr 01 10 <<< "${o1_bits:2:1}")
+o1_bits="${o1_bits:0:2}$flipped_bit${o1_bits:3:1}"
+o1_bits=$(printf "%x" $((2#"$o1_bits")))
+
+# Finally, rebuild the first octet of the MAC address.
+o1="${o1:0:1}$o1_bits"
+
+
+# Build the hextets for the IPv6 link local address.
+if [[ $o1 == 00 ]] && [[ $o2 == 00 ]]; then
+	h5=""
+else
+	# Strip possible leading zeros.
+	h5="$(printf "%x:" "0x$o1$o2")"
+fi
+
+if [[ $o3 == 00 ]]; then
+	h6="ff:"
+else
+	h6="$(printf "%xff:" "0x$o3")"
+fi
+
+h7="fe$o4:"
+
+h8="$(printf "%x" "0x$o5$o6")"
+
+printf "fe80::%s%s%s%s\n" "$h5" "$h6" "$h7" "$h8"

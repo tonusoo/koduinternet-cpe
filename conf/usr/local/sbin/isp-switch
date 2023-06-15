@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+
+# Title               : isp-switch
+# Last modified date  : 30.05.2023
+# Author              : Martin Tonusoo
+# Description         : Script pings anycast DNS servers IPv4 addresses
+#                       using a primary connection(wan0; Telia fiber) and
+#                       if none of those replies, then switches v4 default
+#                       route to backup connection(wwan0; Telia mobile
+#                       broadband). Once the primary connection restores,
+#                       the v4 default route is switched back to primary
+#                       connection.
+# Options             :
+# Notes               : "ignore_routes_with_linkdown" settings in
+#                       /etc/sysctl.conf ensure that the route is
+#                       instantly ignored if its link is down.
+
+
+ping_check() {
+
+	ping_success=0
+
+	for ip in 1.1.1.1 8.8.8.8 9.9.9.9; do
+		# Even if one ping out of four succeeds, then
+		# the exit code is 0.
+		ping -I "$1" -W 1 -c 4 -q "$ip" &>/dev/null
+		ping_success=$(( ping_success + $? ))
+	done
+
+	if (( ping_success >= 3 )); then
+		# All 12 pings failed.
+		return 1
+	else
+		return 0
+	fi
+}
+
+
+read -r ip_regex << EOF
+^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]?|0)\.){3}\
+(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]?|0)$
+EOF
+
+
+while true; do
+
+	sleep 1
+
+	read -r _ _ wan0_gw _ wan0_metric _ <<-EOF
+		$(ip -4 -o route show default dev wan0 2>/dev/null | grep -v " linkdown")
+	EOF
+
+	read -r _ _ wwan0_gw _ wwan0_metric _ <<-EOF
+		$(ip -4 -o route show default dev wwan0 2>/dev/null | grep -v " linkdown")
+	EOF
+
+
+	# There is no point to proceed if both or one of the default
+	# routes is missing. In addition, sanity check the next hop
+	# address.
+	if ! { [[ "$wan0_gw" =~ $ip_regex ]] || [[ "$wwan0_gw" =~ $ip_regex ]]; }; then
+
+		echo "No default route found."
+		continue
+
+	elif ! [[ "$wan0_gw" =~ $ip_regex ]]; then
+
+		echo "Primary default route via wan0 is missing."
+		continue
+
+	elif ! [[ "$wwan0_gw" =~ $ip_regex ]]; then
+
+		echo "Failover default route via wwan0 is missing."
+		continue
+
+	fi
+
+
+	# Default IPv4 route metric is 0.
+	if (( ${wan0_metric:-0} < ${wwan0_metric:-0} )); then
+
+		if ! ping_check wan0; then
+
+			# Ping check on primary connection failed.
+			echo "Switching to backup via $wwan0_gw dev wwan0"
+
+			ip -4 route flush default
+			ip -4 route add default via "$wwan0_gw" dev wwan0 metric 100
+			ip -4 route add default via "$wan0_gw" dev wan0 metric 200
+		fi
+
+	else
+		# Backup connection is in use. Check if it is possible
+		# to switch back to primary connection.
+		ip -4 route add default via "$wan0_gw" table 100
+		# Specifying the "priority" ensures that there are
+		# no duplicate rules created.
+		ip rule add oif wan0 lookup 100 priority 100
+
+		if ping_check wan0; then
+
+			# Ping check on primary connection succeeded.
+			echo "Switching to primary via $wan0_gw dev wan0"
+
+			ip -4 route flush default
+			ip -4 route add default via "$wan0_gw" dev wan0 metric 100
+			ip -4 route add default via "$wwan0_gw" dev wwan0 metric 200
+		fi
+
+		ip -4 route flush table 100
+		ip rule delete oif wan0 lookup 100 priority 100
+
+	fi
+done

@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+
+# Title               : rm-expired-prefixes
+# Last modified date  : 16.03.2023
+# Author              : Martin Tonusoo
+# Description         : Script removes expired "prefix" statements from
+#                       /etc/radvd.conf file based on the expiration
+#                       field(ISO 8601 timestamp) at the end of "prefix"
+#                       line. The expiration field is added to the "prefix"
+#                       statements by dhclient exit hook.
+# Options             :
+# Notes               :
+
+radvd_conf="/etc/radvd.conf"
+new_radvd_conf="${radvd_conf}.rm-expired-prefixes.$$"
+
+while IFS= read -r line; do
+
+	case "$line" in
+		"    prefix "*)
+			# Add the "prefix" statement if its timestamp
+			# is in the future.
+			if [[ "${line##* }" > $(date --iso-8601="seconds") ]]; then
+				echo "$line"
+			else
+				prefix="${line%% \{*}"
+				logger -t "rm-expired-prefixes" -p daemon.info \
+				"INFO: Removed expired ${prefix#    } from $radvd_conf"
+			fi
+			;;
+		*)
+			echo "$line"
+			;;
+	esac
+
+done < "$radvd_conf" >> "$new_radvd_conf"
+
+chown --reference="$radvd_conf" "$new_radvd_conf"
+chmod --reference="$radvd_conf" "$new_radvd_conf"
+
+mv -f "$new_radvd_conf" "$radvd_conf"
+
+systemctl is-active --quiet radvd.service && systemctl reload radvd.service

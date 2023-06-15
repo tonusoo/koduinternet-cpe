@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+
+# Title               : mcast_converter
+# Last modified date  : 12.04.2023
+# Author              : Martin Tonusoo
+# Description         : Script converts IPv4 multicast address to
+#                       multicast MAC address or multicast MAC
+#                       address to IPv4 multicast addresses depending
+#                       on the input.
+# Options             : IPv4 multicast address or multicast MAC address.
+# Notes               :
+
+
+# 224.0.0.0 - 239.255.255.255
+read -r mip_regex << EOF
+^2(2[4-9]|3[0-9])\.\
+(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]?|0)\.\
+(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]?|0)\.\
+(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]?|0)$
+EOF
+
+
+# 01:00:5e:00:00:00 - 01:00:5e:7f:ff:ff
+read -r mac_regex << EOF
+^01:00:5e:\
+([0-7][0-9a-f]):\
+([0-9a-f]{2}):\
+([0-9a-f]{2})$
+EOF
+
+
+if [[ "$1" =~ $mip_regex ]]; then
+
+	for (( n="${BASH_REMATCH[2]}"; n>0; n >>= 1 )); do
+		o2_bits="$(( n & 1 ))$o2_bits"
+	done
+
+	printf -v o2_bits "%08d" "$o2_bits"
+	o2_bits="0${o2_bits:1}"
+
+	printf "%s:%02x:%02x:%02x\n" \
+						"01:00:5e" \
+						"$(( 2#$o2_bits ))" \
+						"${BASH_REMATCH[3]}" \
+						"${BASH_REMATCH[4]}"
+
+elif [[ "$1" =~ $mac_regex ]]; then
+
+	o4_dec=$(( 16#"${BASH_REMATCH[1]}" ))
+
+	for (( n="$o4_dec"; n>0; n >>= 1 )); do
+		o4_bits="$(( n & 1 ))$o4_bits"
+	done
+
+	printf -v o4_bits "%08d" "$o4_bits"
+	o4_bits="${o4_bits:1}"
+
+	for bits in {0..1}{0..1}{0..1}{0..1}{0..1}; do
+
+		printf "%d.%d.%d.%d\n" \
+				$(( 2#"1110${bits:0:4}" )) \
+				$(( 2#"${bits:4:1}$o4_bits" )) \
+				$(( 16#"${BASH_REMATCH[2]}" )) \
+				$(( 16#"${BASH_REMATCH[3]}" ))
+
+	done
+
+else
+
+	printf "%s\n%s\n" \
+		"Invalid multicast MAC or IPv4 address" \
+		"Examples: '${0##*/} 01:00:5e:00:99:0a' or '${0##*/} 239.1.2.100'" >&2
+	exit 1
+
+fi

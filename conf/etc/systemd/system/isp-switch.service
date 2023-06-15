@@ -1,0 +1,11 @@
+[Unit]
+Description=Switches v4 connectivity to mobile broadband backup
+After=network.target
+
+[Service]
+Type=simple
+Restart=always
+ExecStart=/usr/local/sbin/isp-switch
+
+[Install]
+WantedBy=multi-user.target
