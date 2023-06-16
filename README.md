@@ -254,8 +254,9 @@ Configuration files: [/etc/usb_modeswitch.d/12d1:157d](https://github.com/tonuso
 
 Telia's service works in a way that the Internet traffic is untagged and IPTV traffic is in the VLAN(IEEE 802.1q) 4. Router has a `wan0` interface for untagged Internet traffic and a VLAN interface named `wan0.4` for IPTV. Both interfaces receive the IPv4 address and netmask via DHCP. `wan0` will get a publicly routable IPv4 address and IPTV interface will get a private IPv4 address. In addition, several v4 routes are installed by DHCP. Few /24 publicly routable networks and the 10/8 are routed via the IPTV interface. Default route is via the Internet interface `wan0`. IPv6 part works in a way that Telia delegates a /56 prefix for LAN hosts from their /32 allocation using a DHCPv6. Internet facing interface will not get an IPv6 address and routing works using the IPv6 link local addresses:
 ```
+root@r1:~# # v6 default route via VRRP virtual router
 root@r1:~# ip -6 r sh default
-default via fe80::200:5eff:fe00:1 dev wan0 proto ra metric 1024 expires 3372sec hoplimit 64 pref medium
+default via fe80::200:5eff:fe00:1 dev wan0 proto ra metric 1024 expires 3286sec hoplimit 64 pref medium
 root@r1:~#
 ```
 
