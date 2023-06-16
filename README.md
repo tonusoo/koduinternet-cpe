@@ -107,7 +107,7 @@ Correct link settings for the first port can be seen below:
 
 <h2 id="modifying-the-nic-driver"> :small_blue_diamond: Modifying the NIC driver</h2>
 
-`bnx2x` driver was [patched](https://github.com/tonusoo/koduinternet-cpe/blob/main/code/bnx2x_link.patch) in order to support the 2500BASE-X mode and ignore the Tx fault:
+`bnx2x` driver was [patched](https://github.com/tonusoo/koduinternet-cpe/blob/main/patches/bnx2x_link.patch) in order to support the 2500BASE-X mode and ignore the Tx fault:
 
 ![bnx2x_link.c diff](https://github.com/tonusoo/koduinternet-cpe/blob/main/imgs/bnx2x_link_diff.jpg)
 
@@ -364,10 +364,10 @@ Scripts: [/etc/dhcp/dhclient-exit-hooks.d/ipv6-pd-br0](https://github.com/tonuso
 
 <h3 id="igmpproxy"> :black_small_square: igmpproxy</h3>
 
-[Patched](https://github.com/tonusoo/koduinternet-cpe/blob/main/code/igmpproxy.patch)(issue [#95](https://github.com/pali/igmpproxy/issues/95)) version of `igmpproxy` is installed. [igmpproxy_0.2.1-1+relaxed-timeout1_amd64.deb](https://github.com/tonusoo/koduinternet-cpe/blob/main/igmpproxy_0.2.1-1%2Brelaxed-timeout1_amd64.deb) package was built with commands below:
+[Patched](https://github.com/tonusoo/koduinternet-cpe/blob/main/patches/igmpproxy.patch)(issue [#95](https://github.com/pali/igmpproxy/issues/95)) version of `igmpproxy` is installed. [igmpproxy_0.2.1-1+relaxed-timeout1_amd64.deb](https://github.com/tonusoo/koduinternet-cpe/blob/main/igmpproxy_0.2.1-1%2Brelaxed-timeout1_amd64.deb) package was built with commands below:
 1. `apt source igmpproxy`
 2. `cd igmpproxy-0.2.1/`
-3. `patch --verbose src/igmpproxy.c ~/koduinternet-cpe/code/igmpproxy.patch`
+3. `patch --verbose src/igmpproxy.c ~/koduinternet-cpe/patches/igmpproxy.patch`
 4. `dch --local +relaxed-timeout` with "relaxed pselect() timeout in main loop" note for the changelog
 5. `cd . && dpkg-buildpackage -b`
 
