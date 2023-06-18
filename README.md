@@ -210,6 +210,19 @@ The same `O5` value was seen on the screenshot of the `Huawei HG8010H ONT` [web 
 
 Configuration leans towards traditional or legacy way of doing things, e.g `iptables` over `nftables`, `udev` rules in `/etc/udev/rules.d/` for renaming network interfaces instead of `/etc/systemd/network/*.link` files, etc. This is an intentional design choice.
 
+List of packages installed using `apt`:
+```
+firmware-bnx2x
+firmware-realtek
+firmware-brcm80211
+usb-modeswitch
+bridge-utils
+radvd
+hostapd
+libpam-yubico
+libpam-google-authenticator
+```
+
 <h3 id="udev-usb_modeswitch-config"> :black_small_square: udev and usb_modeswitch config</h3>
 
 `Huawei E3372s-153` USB LTE modem has to be mode switched from `157d`(CD/DVD drive) to [modem mode](https://wiki.dd-wrt.com/wiki/index.php/3G_/_3.5G#Huawei) which is `14dc` for this particular device.
@@ -245,6 +258,7 @@ root@r1:~#
 ```
 
 `udev` rule named `70-persistent-net.rules` ensures the `wan*`, `wwan*`, `lan*` and `wlan*` interfaces naming convention:
+
 ![ip_link_brief](https://github.com/tonusoo/koduinternet-cpe/blob/main/imgs/ip_link_brief.jpg)
 
 Configuration files: [/etc/usb_modeswitch.d/12d1:157d](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/usb_modeswitch.d/12d1%3A157d), [/etc/udev/rules.d/70-persistent-net.rules](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/udev/rules.d/70-persistent-net.rules)
@@ -305,7 +319,7 @@ root@r1:~# lsattr /etc/resolv.conf
 root@r1:~#
 ```
 
-Configuration files and scripts: [/etc/network/interfaces](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/network/interfaces), [/etc/systemd/system/networking.service.d/override.conf](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/systemd/system/networking.service.d/override.conf), [/etc/dhcp/dhclient-exit-hooks.d/ipv6-pd-br0](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/dhcp/dhclient-exit-hooks.d/ipv6-pd-br0), [/usr/local/bin/mac_to_ip6_ll_addr](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/usr/local/bin/mac_to_ip6_ll_addr), [/etc/dhcp/dhclient-enter-hooks.d/get-static-ipv4-addrs](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/dhcp/dhclient-enter-hooks.d/get-static-ipv4-addrs), [/etc/dhcp/dhclient-exit-hooks.d/restore-static-ipv4-addrs](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/dhcp/dhclient-exit-hooks.d/restore-static-ipv4-addrs), [/etc/dhcp/dhclient-enter-hooks.d/nodnsupdate](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/dhcp/dhclient-enter-hooks.d/nodnsupdate), [/etc/dhcp/dhclient-enter-hooks.d/unset-dhcp-options](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/dhcp/dhclient-enter-hooks.d/unset-dhcp-options), [/etc/resolv.conf](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/resolv.conf), [/etc/modprobe.d/bnx2x.conf](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/modprobe.d/bnx2x.conf), [/etc/sysctl.conf](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/sysctl.conf), [/etc/systemd/system/isp-switch.service](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/systemd/system/isp-switch.service), [/usr/local/sbin/isp-switch](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/usr/local/sbin/isp-switch)
+Configuration files and scripts: [/etc/network/interfaces](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/network/interfaces), [/etc/systemd/system/networking.service.d/override.conf](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/systemd/system/networking.service.d/override.conf), [/etc/dhcp/dhclient.conf](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/dhcp/dhclient.conf), [/etc/dhcp/dhclient-exit-hooks.d/ipv6-pd-br0](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/dhcp/dhclient-exit-hooks.d/ipv6-pd-br0), [/usr/local/bin/mac_to_ip6_ll_addr](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/usr/local/bin/mac_to_ip6_ll_addr), [/etc/dhcp/dhclient-enter-hooks.d/get-static-ipv4-addrs](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/dhcp/dhclient-enter-hooks.d/get-static-ipv4-addrs), [/etc/dhcp/dhclient-exit-hooks.d/restore-static-ipv4-addrs](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/dhcp/dhclient-exit-hooks.d/restore-static-ipv4-addrs), [/etc/dhcp/dhclient-enter-hooks.d/nodnsupdate](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/dhcp/dhclient-enter-hooks.d/nodnsupdate), [/etc/dhcp/dhclient-enter-hooks.d/unset-dhcp-options](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/dhcp/dhclient-enter-hooks.d/unset-dhcp-options), [/etc/resolv.conf](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/resolv.conf), [/etc/modprobe.d/bnx2x.conf](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/modprobe.d/bnx2x.conf), [/etc/sysctl.conf](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/sysctl.conf), [/etc/systemd/system/isp-switch.service](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/systemd/system/isp-switch.service), [/usr/local/sbin/isp-switch](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/usr/local/sbin/isp-switch)
 
 <h3 id="iptables"> :black_small_square: iptables</h3>
 
