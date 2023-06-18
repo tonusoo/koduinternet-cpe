@@ -60,9 +60,12 @@ PSU: Chieftec CTG-500-80P
 case: Chieftec 1E0-500A-CT04
 ```
 
+![router with side panel removed](https://github.com/tonusoo/koduinternet-cpe/blob/main/imgs/router_with_side_panel_removed.jpg)
+
+
 <h2 id="configuring-nic-nvram"> :small_blue_diamond: Configuring NIC NVRAM</h2>
 
-Both the <a href="https://www.huawei.com/ucmf/groups/public/documents/webasset/hw_415752.pdf">Huawei MA5671A SFP ONT</a> and <code>Dell N20KJ</code> NIC using the <code>Broadcom BCM57810</code> chipset support the 2500BASE-X mode. According to <a href="https://github.com/tonusoo/koduinternet-cpe/blob/main/docs/netxtreme_ii.pdf">Broadcom NetXtreme II Network Adapter User Guide</a>, the 2500BASE-X is a term used by Broadcom to describe 2.5 Gbit/s operation, where electricals are leveraged from IEEE 802.3ae-2002 (XAUI).
+Both the <a href="https://github.com/tonusoo/koduinternet-cpe/blob/main/docs/hw_415752.pdf">Huawei MA5671A SFP ONT</a> and <code>Dell N20KJ</code> NIC using the <code>Broadcom BCM57810</code> chipset support the 2500BASE-X mode. According to <a href="https://github.com/tonusoo/koduinternet-cpe/blob/main/docs/netxtreme_ii.pdf">Broadcom NetXtreme II Network Adapter User Guide</a>, the 2500BASE-X is a term used by Broadcom to describe 2.5 Gbit/s operation, where electricals are leveraged from IEEE 802.3ae-2002 (XAUI).
 
 
 By default, the `Dell N20KJ` branded NIC supports 1GigE and 10GigE modes. One needs to configure the NIC's NVRAM with [QLogic BCM577xx/BCM578xx diagnostics utility named eDiag](https://github.com/tonusoo/koduinternet-cpe/raw/main/uefi_ediag.tgz) in order to enable the 2500BASE-X mode. For example, the NIC can be passed through to a VM where `ediag_x64.efi` UEFI binary in engineering mode(`-b10eng`) is executed:
