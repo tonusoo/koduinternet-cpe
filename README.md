@@ -24,6 +24,7 @@
         <li><a href="#linux-pam-config">Linux PAM config</a></li>
       </ul>
     </li>
+    <li><a href="#bandwidth-tests"> ➤ Bandwidth tests</a></li>
     <li>
       <a href="#hardware-mods"> ➤ Hardware mods</a>
       <ul>
@@ -489,6 +490,21 @@ root@r1:~#
 YubiKeys token IDs are mapped to username in `/etc/authorized_yubikeys` file. `$HOME/.google_authenticator` is created by `google-authenticator` utility and it includes the secret key, emergency scratch codes, rate-limit configuration, etc. SSH keyboard interactive authentication is enabled in `/etc/ssh/sshd_config` by changing the value of `ChallengeResponseAuthentication` to `yes`.
 
 Configuration files: [/etc/pam.d/common-auth](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/pam.d/common-auth)
+
+<h2 id="bandwidth-tests"> :small_blue_diamond: Bandwidth tests</h2>
+
+Statistics of `wan0` when host connected to `lan2` was running a TCP bidirectional test against `iperf3` server in another ISP network:
+![iptraf-ng wan0 stats](https://github.com/tonusoo/koduinternet-cpe/blob/main/imgs/iptraf-ng_wan0_stats.jpg)
+
+Statistics of all the interfaces when hosts connected to `lan2` and `lan3` were running a TCP bidirectional test against `iperf3` server in another ISP network and smartphone connected to Wi-Fi was running Ookla's Speedtest:
+![iptraf-ng general stats](https://github.com/tonusoo/koduinternet-cpe/blob/main/imgs/iptraf-ng_general_stats.jpg)
+
+[Speedtest.net](https://www.speedtest.net/) results when executed from a host connected to `lan2`:
+![speedtest from host in lan](https://github.com/tonusoo/koduinternet-cpe/blob/main/imgs/speedtest_from_host_in_lan.jpg)
+
+[Speedtest.net](https://www.speedtest.net/) results when executed from a smartphone connected to `r1` Wi-Fi network:
+![speedtest from wifi client in lan](https://github.com/tonusoo/koduinternet-cpe/blob/main/imgs/speedtest_from_wifi_client_in_lan.jpg)
+
 
 <h2 id="hardware-mods"> :small_blue_diamond: Hardware mods</h2>
 <h3 id="nic-fan-replacement"> :black_small_square: Replacing the Dell N20KJ stock fan with Noctua NF-A4x10 fan</h3>
