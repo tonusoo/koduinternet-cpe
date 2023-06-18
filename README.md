@@ -494,12 +494,15 @@ Configuration files: [/etc/pam.d/common-auth](https://github.com/tonusoo/koduint
 <h2 id="bandwidth-tests"> :small_blue_diamond: Bandwidth tests</h2>
 
 Statistics of `wan0` when host connected to `lan2` was running a TCP bidirectional test against `iperf3` server in another ISP network:
+
 ![iptraf-ng wan0 stats](https://github.com/tonusoo/koduinternet-cpe/blob/main/imgs/iptraf-ng_wan0_stats.jpg)
 
 Statistics of all the interfaces when hosts connected to `lan2` and `lan3` were running a TCP bidirectional test against `iperf3` server in another ISP network and smartphone connected to Wi-Fi was running Ookla's Speedtest:
+
 ![iptraf-ng general stats](https://github.com/tonusoo/koduinternet-cpe/blob/main/imgs/iptraf-ng_general_stats.jpg)
 
 [Speedtest.net](https://www.speedtest.net/) results when executed from a host connected to `lan2`:
+
 ![speedtest from host in lan](https://github.com/tonusoo/koduinternet-cpe/blob/main/imgs/speedtest_from_host_in_lan.jpg)
 
 [Speedtest.net](https://www.speedtest.net/) results when executed from a smartphone connected to `r1` Wi-Fi network:
