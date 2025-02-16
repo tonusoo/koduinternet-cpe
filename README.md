@@ -7,6 +7,7 @@
     <li><a href="#about-the-project"> ➤ About The Project</a></li>
     <li><a href="#hardware"> ➤ Hardware</a></li>
     <li><a href="#configuring-nic-nvram"> ➤ Configuring NIC NVRAM</a></li>
+    <li><a href="#details-nic-nvram"> ➤ Details of Configuring NIC NVRAM</a></li>
     <li><a href="#modifying-the-nic-driver"> ➤ Modifying the NIC driver</a></li>
     <li><a href="#rooting-the-sfp-ont"> ➤ Rooting the SFP ONT</a></li>
     <li><a href="#modifying-the-sfp-ont-serial"> ➤ Modifying the SFP ONT serial</a></li>
@@ -107,6 +108,96 @@ exit
 
 Correct link settings for the first port can be seen below:
 ![UEFI eDiag in qemu VM 2.5G settings](https://github.com/tonusoo/koduinternet-cpe/blob/main/imgs/UEFI_eDiag_in_qemu_VM_2_5G_settings.jpg)
+
+<h2 id="details-nic-nvram"> :small_blue_diamond: Configuring NIC NVRAM</h2>
+
+Hello Martin, I had questions after reading configuring-nic-nvram.
+
+The questions I had were:
+
+* What does qemu mean when it says that /dev/vfio/35 does not exist?
+
+When qemu complains that some integer under /dev/vfio/ does not exist, it means that you have not yet correctly configured the NIC for use by the vfio-pci kernel module.  Continue reading.
+
+* How do I keep bnx2x from loading in the hypervisor so that the device can be accessed properly in the guest VM?
+
+In order to keep the bnx2x module, which is installed by default on debian, from loading at boot time, consider this:
+
+```
+$ cat /etc/modprobe.d/00-netextreme-vfio.conf 
+install bnx2x /bin/true
+options vfio-pci ids=14e4:168e
+softdep bnx2x pre: vfio-pci
+```
+
+* How does one configure iommu for a 14e4:168e ?
+
+To enable iommu, append some command line arguments to the kernel line.
+```
+$ grep iommu /etc/default/grub
+GRUB_CMDLINE_LINUX_DEFAULT="kvm-intel.nested=1 intel_iommu=on vfio_pci.ids=15b3:1003 modprobe.blacklist=bnx2x bnx2x.blacklist=1 rd.driver.blacklist=bnx2x brd rd_size=33554432 console=tty0 console=ttyS1,38400n8 cgroup_enable=memory swapaccount=1"
+```
+
+* What even is a /sys/bus/pci/drivers/vfio-pci/new_id and why do we echo make and model to it?
+
+I don't know what `/sys/bus/pci/drivers/vfio-pci/new_id` is, but IBM tells me that in order to bind the driver to a device on the pci(e) bus, the manufacturer id and product id without colon separation should be echoed to it.  Probably right after the system boots up is best.
+
+```
+$ grep vfio-pci /etc/rc.local
+echo 14e4 168e > /sys/bus/pci/drivers/vfio-pci/new_id
+```
+
+* Do I need to update my initrd or grub configuration for these changes to take effect on the next reboot?
+
+Good thinking!  Yes, update your grub configuration and re-build your initrd.  While you're at it, you might as well install the latest kernel.  And power all the way off and remove the power cables from the PSU for the count of five and then boot back up again.
+
+```
+$ sudo -i
+# update-grub ; apt-get update ; apt-get install --reinstall -t bookworm-backports linux-image-amd64 ; update-initramfs -u
+# shutdown -h now
+```
+
+* How do I confirm that the device is ready for passthrough to qemu?
+
+When your device is correctly configured, `lspci -v` will show `vfio-pci` in the `Kernel driver in use` field of its output.
+
+```
+$ lspci -n -v -s 02:00
+02:00.0 0200: 14e4:168e (rev 10)
+        Subsystem: 14e4:1006
+        Physical Slot: 5
+        Flags: bus master, fast devsel, latency 0, IRQ 16, NUMA node 0, IOMMU group 35
+        Memory at db000000 (64-bit, prefetchable) [size=8M]
+        Memory at db800000 (64-bit, prefetchable) [size=8M]
+        Memory at dc010000 (64-bit, prefetchable) [size=64K]
+        Expansion ROM at d9c00000 [virtual] [disabled] [size=512K]
+        Capabilities: <access denied>
+        Kernel driver in use: vfio-pci
+        Kernel modules: bnx2x
+
+02:00.1 0200: 14e4:168e (rev 10)
+        Subsystem: 14e4:1006
+        Physical Slot: 5
+        Flags: bus master, fast devsel, latency 0, IRQ 17, NUMA node 0, IOMMU group 35
+        Memory at da000000 (64-bit, prefetchable) [size=8M]
+        Memory at da800000 (64-bit, prefetchable) [size=8M]
+        Memory at dc000000 (64-bit, prefetchable) [size=64K]
+        Expansion ROM at d9c80000 [virtual] [disabled] [size=512K]
+        Capabilities: <access denied>
+        Kernel driver in use: vfio-pci
+        Kernel modules: bnx2x
+```
+
+* How do I attach to that serial terminal?
+
+```
+$ telnet 127.0.0.1 5016
+```
+
+* What does the scrollback buffer of the uefi serial console look like?
+
+https://gist.github.com/cjac/e17d47676d1dfc26fbf65fe15116295c
+
 
 
 <h2 id="modifying-the-nic-driver"> :small_blue_diamond: Modifying the NIC driver</h2>
