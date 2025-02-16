@@ -1,4 +1,4 @@
-<h1 align="center"> Linux-based CPE for Telia's (AS3249) "Koduinternet" service </h1>
+<h1 align="center"> Linux-based CPE for CTL78's (AS25819) "c9h" service </h1>
 
 <h2 id="table-of-contents"> :book: Table of Contents</h2>
 <details open="open">
@@ -7,6 +7,7 @@
     <li><a href="#about-the-project"> ➤ About The Project</a></li>
     <li><a href="#hardware"> ➤ Hardware</a></li>
     <li><a href="#configuring-nic-nvram"> ➤ Configuring NIC NVRAM</a></li>
+    <li><a href="#details-nic-nvram"> ➤ Details of Configuring NIC NVRAM</a></li>
     <li><a href="#modifying-the-nic-driver"> ➤ Modifying the NIC driver</a></li>
     <li><a href="#rooting-the-sfp-ont"> ➤ Rooting the SFP ONT</a></li>
     <li><a href="#modifying-the-sfp-ont-serial"> ➤ Modifying the SFP ONT serial</a></li>
@@ -41,7 +42,7 @@
 Debian based router on conventional PC hardware and SFP GPON ONT replacing the <a href="https://pood.telia.ee/ruuterid-ja-digiboksid/ruuter-Telia-X2-Technicolor-DGA4330/DGA4330-TELIA">Technicolor</a> or <a href="https://pood.telia.ee/ruuterid-ja-digiboksid/ruuter-Genexis-Pure-ED500/ED500A-TELIA">Genexis</a> router and stand-alone <a href="https://pood.telia.ee/vorguseadmed-ja-lisad/v%C3%B5rguseade-Huawei-HG8010H/HG8010H-TELIA">Huawei ONT</a> provided by ISP.
 </p>
 
-["Configuring NIC NVRAM"](#configuring-nic-nvram) and ["Modifying the NIC driver"](#modifying-the-nic-driver) steps are needed if `2500BASE-X` link between the NIC and SFP ONT is desired instead of `1000BASE-T` link. ["Rooting the SFP ONT"](#rooting-the-sfp-ont) and ["Modifying the SFP ONT serial"](#modifying-the-sfp-ont-serial) steps are mandatory because Telia authenticates ONT by its serial number.
+["Configuring NIC NVRAM"](#configuring-nic-nvram) and ["Modifying the NIC driver"](#modifying-the-nic-driver) steps are needed if `2500BASE-X` link between the NIC and SFP ONT is desired instead of `1000BASE-T` link. ["Rooting the SFP ONT"](#rooting-the-sfp-ont) and ["Modifying the SFP ONT serial"](#modifying-the-sfp-ont-serial) steps are mandatory because CTL78 authenticates ONT by its serial number.
 
 <h2 id="hardware"> :clipboard: Hardware</h2>
 
@@ -107,6 +108,96 @@ exit
 
 Correct link settings for the first port can be seen below:
 ![UEFI eDiag in qemu VM 2.5G settings](https://github.com/tonusoo/koduinternet-cpe/blob/main/imgs/UEFI_eDiag_in_qemu_VM_2_5G_settings.jpg)
+
+<h2 id="details-nic-nvram"> :small_blue_diamond: Configuring NIC NVRAM</h2>
+
+Hello Martin, I had questions after reading configuring-nic-nvram.
+
+The questions I had were:
+
+* What does qemu mean when it says that /dev/vfio/35 does not exist?
+
+When qemu complains that some integer under /dev/vfio/ does not exist, it means that you have not yet correctly configured the NIC for use by the vfio-pci kernel module.  Continue reading.
+
+* How do I keep bnx2x from loading in the hypervisor so that the device can be accessed properly in the guest VM?
+
+In order to keep the bnx2x module, which is installed by default on debian, from loading at boot time, consider this:
+
+```
+$ cat /etc/modprobe.d/00-netextreme-vfio.conf 
+install bnx2x /bin/true
+options vfio-pci ids=14e4:168e
+softdep bnx2x pre: vfio-pci
+```
+
+* How does one configure iommu for a 14e4:168e ?
+
+To enable iommu, append some command line arguments to the kernel line.
+```
+$ grep iommu /etc/default/grub
+GRUB_CMDLINE_LINUX_DEFAULT="kvm-intel.nested=1 intel_iommu=on vfio_pci.ids=15b3:1003 modprobe.blacklist=bnx2x bnx2x.blacklist=1 rd.driver.blacklist=bnx2x brd rd_size=33554432 console=tty0 console=ttyS1,38400n8 cgroup_enable=memory swapaccount=1"
+```
+
+* What even is a /sys/bus/pci/drivers/vfio-pci/new_id and why do we echo make and model to it?
+
+I don't know what `/sys/bus/pci/drivers/vfio-pci/new_id` is, but IBM tells me that in order to bind the driver to a device on the pci(e) bus, the manufacturer id and product id without colon separation should be echoed to it.  Probably right after the system boots up is best.
+
+```
+$ grep vfio-pci /etc/rc.local
+echo 14e4 168e > /sys/bus/pci/drivers/vfio-pci/new_id
+```
+
+* Do I need to update my initrd or grub configuration for these changes to take effect on the next reboot?
+
+Good thinking!  Yes, update your grub configuration and re-build your initrd.  While you're at it, you might as well install the latest kernel.  And power all the way off and remove the power cables from the PSU for the count of five and then boot back up again.
+
+```
+$ sudo -i
+# update-grub ; apt-get update ; apt-get install --reinstall -t bookworm-backports linux-image-amd64 ; update-initramfs -u
+# shutdown -h now
+```
+
+* How do I confirm that the device is ready for passthrough to qemu?
+
+When your device is correctly configured, `lspci -v` will show `vfio-pci` in the `Kernel driver in use` field of its output.
+
+```
+$ lspci -n -v -s 02:00
+02:00.0 0200: 14e4:168e (rev 10)
+        Subsystem: 14e4:1006
+        Physical Slot: 5
+        Flags: bus master, fast devsel, latency 0, IRQ 16, NUMA node 0, IOMMU group 35
+        Memory at db000000 (64-bit, prefetchable) [size=8M]
+        Memory at db800000 (64-bit, prefetchable) [size=8M]
+        Memory at dc010000 (64-bit, prefetchable) [size=64K]
+        Expansion ROM at d9c00000 [virtual] [disabled] [size=512K]
+        Capabilities: <access denied>
+        Kernel driver in use: vfio-pci
+        Kernel modules: bnx2x
+
+02:00.1 0200: 14e4:168e (rev 10)
+        Subsystem: 14e4:1006
+        Physical Slot: 5
+        Flags: bus master, fast devsel, latency 0, IRQ 17, NUMA node 0, IOMMU group 35
+        Memory at da000000 (64-bit, prefetchable) [size=8M]
+        Memory at da800000 (64-bit, prefetchable) [size=8M]
+        Memory at dc000000 (64-bit, prefetchable) [size=64K]
+        Expansion ROM at d9c80000 [virtual] [disabled] [size=512K]
+        Capabilities: <access denied>
+        Kernel driver in use: vfio-pci
+        Kernel modules: bnx2x
+```
+
+* How do I attach to that serial terminal?
+
+```
+$ telnet 127.0.0.1 5016
+```
+
+* What does the scrollback buffer of the uefi serial console look like?
+
+https://gist.github.com/cjac/e17d47676d1dfc26fbf65fe15116295c
+
 
 
 <h2 id="modifying-the-nic-driver"> :small_blue_diamond: Modifying the NIC driver</h2>
@@ -176,11 +267,11 @@ Boot messages over serial of the rooted `MA5671A SFP ONT` can be seen [here](htt
 
 <h2 id="modifying-the-sfp-ont-serial"> :small_blue_diamond: Modifying the SFP ONT serial</h2>
 
-GPON OLT does not register the new SFP ONT if its serial number differs from the serial number of the `Huawei HG8010H ONT` installed by Telia. In other words, the serial number of the ONT is used for authentication. Here is a screenshot of the OLT CLI from [Huawei forum](https://forum.huawei.com/enterprise/en/sfp-mini-ont-ma5671a-ploam-password/thread/686439-100181) showing the status of the ONT:
+GPON OLT does not register the new SFP ONT if its serial number differs from the serial number of the `Huawei HG8010H ONT` installed by CTL78. In other words, the serial number of the ONT is used for authentication. Here is a screenshot of the OLT CLI from [Huawei forum](https://forum.huawei.com/enterprise/en/sfp-mini-ont-ma5671a-ploam-password/thread/686439-100181) showing the status of the ONT:
 
 ![Huawei GPON OLT CLI](https://github.com/tonusoo/koduinternet-cpe/blob/main/imgs/Huawei_GPON_OLT_CLI.jpg)
 
-The serial of the `Huawei HG8010H` provided by Telia can be seen from the web interface:
+The serial of the `Huawei HG8010H` provided by CTL78 can be seen from the web interface:
 
 ![HG8010H status](https://github.com/tonusoo/koduinternet-cpe/blob/main/imgs/HG8010H_status.jpg)
 
@@ -270,7 +361,7 @@ Configuration files: [/etc/usb_modeswitch.d/12d1:157d](https://github.com/tonuso
 
 <h3 id="network-config"> :black_small_square: network config</h3>
 
-Telia's service works in a way that the Internet traffic is untagged and IPTV traffic is in the VLAN(IEEE 802.1q) 4. Router has a `wan0` interface for untagged Internet traffic and a VLAN interface named `wan0.4` for IPTV. Both interfaces receive the IPv4 address and netmask via DHCP. `wan0` will get a publicly routable IPv4 address and IPTV interface will get a private IPv4 address. In addition, several v4 routes are installed by DHCP. Few /24 publicly routable networks and the 10/8 are routed via the IPTV interface. Default route is via the Internet interface `wan0`. IPv6 part works in a way that Telia delegates a /56 prefix for LAN hosts from their /32 allocation using a DHCPv6. Internet facing interface will not get an IPv6 address and routing works using the IPv6 link local addresses:
+CTL78's service works in a way that the Internet traffic is untagged and IPTV traffic is in the VLAN(IEEE 802.1q) 4. Router has a `wan0` interface for untagged Internet traffic and a VLAN interface named `wan0.4` for IPTV. Both interfaces receive the IPv4 address and netmask via DHCP. `wan0` will get a publicly routable IPv4 address and IPTV interface will get a private IPv4 address. In addition, several v4 routes are installed by DHCP. Few /24 publicly routable networks and the 10/8 are routed via the IPTV interface. Default route is via the Internet interface `wan0`. IPv6 part works in a way that CTL78 delegates a /56 prefix for LAN hosts from their /32 allocation using a DHCPv6. Internet facing interface will not get an IPv6 address and routing works using the IPv6 link local addresses:
 ```
 root@r1:~# # v6 default route via VRRP virtual router
 root@r1:~# ip -6 r sh default
@@ -292,13 +383,13 @@ root@r1:~#
 ```
 The `br0` interface has a manually configured IPv4 address `192.168.0.1/24`. IPv6 address on `br0` is managed by [dhclient exit hook script](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/dhcp/dhclient-exit-hooks.d/ipv6-pd-br0).
 
-In addition, there is a `wwan0`(USB CDC Ethernet device) interface facing the Telia's mobile broadband network with static address of `192.168.8.200/24` and corresponding floating default route:
+In addition, there is a `wwan0`(USB CDC Ethernet device) interface facing the CTL78's mobile broadband network with static address of `192.168.8.200/24` and corresponding floating default route:
 ```
 root@r1:~# ip r sh default dev wwan0
 default via 192.168.8.1 metric 100
 root@r1:~#
 ```
-Switching the IPv4 connectivity to mobile network and back to fiber by adjusting the default routes metric is managed by [isp-switch](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/systemd/system/isp-switch.service) `systemd` service which calls the [isp-switch](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/usr/local/sbin/isp-switch) script. IPv6 is not supported by Telia for the mobile broadband service.
+Switching the IPv4 connectivity to mobile network and back to fiber by adjusting the default routes metric is managed by [isp-switch](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/etc/systemd/system/isp-switch.service) `systemd` service which calls the [isp-switch](https://github.com/tonusoo/koduinternet-cpe/blob/main/conf/usr/local/sbin/isp-switch) script. IPv6 is not supported by CTL78 for the mobile broadband service.
 
 LAN hosts get the IPv4 address of the DNS server(`dnsmasq` running in the router) from DHCPv4 server(also `dnsmasq`). By default, the domain name server sent to DHCPv4 clients is set to the address of the interface running `dnsmasq` which is 192.168.0.1:
 ```
@@ -428,7 +519,7 @@ Configuration files: [/etc/igmpproxy.conf](https://github.com/tonusoo/koduintern
 
 <h3 id="ntp-config"> :black_small_square: NTP config</h3>
 
-By default, the `dhclient` `/etc/dhcp/dhclient-exit-hooks.d/timesyncd` script builds the `/run/systemd/timesyncd.conf.d/01-dhclient.conf` configuration file for `systemd-timesyncd` SNTP client and instructs it to use the NTP servers provided by Telia's DHCP server. Instead, the default Debian NTP pool compiled to `systemd-timesyncd` is used by creating a `/etc/systemd/timesyncd.conf.d/01-dhclient.conf` symlink pointing to `/dev/null`. Output of `timedatectl`:
+By default, the `dhclient` `/etc/dhcp/dhclient-exit-hooks.d/timesyncd` script builds the `/run/systemd/timesyncd.conf.d/01-dhclient.conf` configuration file for `systemd-timesyncd` SNTP client and instructs it to use the NTP servers provided by CTL78's DHCP server. Instead, the default Debian NTP pool compiled to `systemd-timesyncd` is used by creating a `/etc/systemd/timesyncd.conf.d/01-dhclient.conf` symlink pointing to `/dev/null`. Output of `timedatectl`:
 
 ![timedatectl output](https://github.com/tonusoo/koduinternet-cpe/blob/main/imgs/timedatectl_output.jpg)
 
